@@ -1,16 +1,55 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
+import closedTile from './assets/minesweeper/closed.svg'
+import pressedTile from './assets/minesweeper/pressed.svg'
+import flagSprite from './assets/minesweeper/flag.svg'
+import mineSprite from './assets/minesweeper/mine.svg'
+import mineRedSprite from './assets/minesweeper/mine_red.svg'
+import mineWrongSprite from './assets/minesweeper/mine_wrong.svg'
+import faceUnpressed from './assets/minesweeper/face_unpressed.svg'
+import facePressed from './assets/minesweeper/face_pressed.svg'
+import faceLose from './assets/minesweeper/face_lose.svg'
+import faceWin from './assets/minesweeper/face_win.svg'
+import type0 from './assets/minesweeper/nums_background.svg'
+import type1 from './assets/minesweeper/type1_check.svg'
+import type2 from './assets/minesweeper/type2_check.svg'
+import type3 from './assets/minesweeper/type3_check.svg'
+import type4 from './assets/minesweeper/type4_check.svg'
+import type5 from './assets/minesweeper/type5_check.svg'
+import type6 from './assets/minesweeper/type6_check.svg'
+import type7 from './assets/minesweeper/type7_check.svg'
+import type8 from './assets/minesweeper/type8_check.svg'
+import digit0 from './assets/minesweeper/d0.svg'
+import digit1 from './assets/minesweeper/d1.svg'
+import digit2 from './assets/minesweeper/d2.svg'
+import digit3 from './assets/minesweeper/d3.svg'
+import digit4 from './assets/minesweeper/d4.svg'
+import digit5 from './assets/minesweeper/d5.svg'
+import digit6 from './assets/minesweeper/d6.svg'
+import digit7 from './assets/minesweeper/d7.svg'
+import digit8 from './assets/minesweeper/d8.svg'
+import digit9 from './assets/minesweeper/d9.svg'
+
 const difficulties = {
   beginner: { label: 'Beginner', rows: 9, cols: 9, mines: 10 },
   intermediate: { label: 'Intermediate', rows: 16, cols: 16, mines: 40 },
   expert: { label: 'Expert', rows: 16, cols: 30, mines: 99 },
 }
 
-const numberPalettes = {
-  classic: ['transparent', '#0a55a6', '#0b8a2a', '#d64540', '#542ab1', '#8a3f00', '#d97e12', '#2085c0', '#5b2caf'],
-  pastel: ['transparent', '#83b8ff', '#7ed69b', '#ffb8ad', '#bda4ff', '#ffdb7d', '#8ed6ff', '#f9a8d4', '#d1a5ff'],
-  neon: ['transparent', '#64ffda', '#7cff8f', '#ff829c', '#c77dff', '#ffd600', '#5af2ff', '#ffa45b', '#cb6ce6'],
+const typeSprites = [type0, type1, type2, type3, type4, type5, type6, type7, type8]
+
+const digitSprites = {
+  '0': digit0,
+  '1': digit1,
+  '2': digit2,
+  '3': digit3,
+  '4': digit4,
+  '5': digit5,
+  '6': digit6,
+  '7': digit7,
+  '8': digit8,
+  '9': digit9,
 }
 
 const defaultPreferences = {
@@ -20,10 +59,10 @@ const defaultPreferences = {
   cellSize: 32,
   showHeatmap: false,
   showHighlights: false,
-  numberPalette: 'classic',
   enableKeyboardNavigation: true,
   showLiveMetrics: false,
   metricsPlacement: 'below',
+  tutorMode: 'off',
 }
 
 const defaultKeybinds = {
@@ -41,39 +80,12 @@ const defaultKeybinds = {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
-const segmentShapes = {
-  A: 'M6 2 H18 L16 5 H8 Z',
-  B: 'M18 4 L21 7 V18 L18 21 L16 18 V7 Z',
-  C: 'M18 21 L21 24 V35 L18 38 L16 35 V24 Z',
-  D: 'M6 35 H18 L16 38 H8 Z',
-  E: 'M3 21 L6 24 V35 L3 38 L1 35 V24 Z',
-  F: 'M3 4 L6 7 V18 L3 21 L1 18 V7 Z',
-  G: 'M6 18 H18 L16 21 H8 Z',
-}
-
-const digitSegments = {
-  '0': ['A', 'B', 'C', 'D', 'E', 'F'],
-  '1': ['B', 'C'],
-  '2': ['A', 'B', 'G', 'E', 'D'],
-  '3': ['A', 'B', 'G', 'C', 'D'],
-  '4': ['F', 'G', 'B', 'C'],
-  '5': ['A', 'F', 'G', 'C', 'D'],
-  '6': ['A', 'F', 'G', 'C', 'D', 'E'],
-  '7': ['A', 'B', 'C'],
-  '8': ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
-  '9': ['A', 'B', 'C', 'D', 'F', 'G'],
-  '-': ['G'],
-}
-
 const SegmentDigit = ({ value }) => {
-  const activeSegments = digitSegments[value] ?? []
-  return (
-    <svg viewBox="0 0 22 40" className="segment-digit" role="presentation">
-      {Object.entries(segmentShapes).map(([key, path]) => (
-        <path key={key} d={path} className={`segment ${activeSegments.includes(key) ? 'on' : ''}`} />
-      ))}
-    </svg>
-  )
+  const sprite = digitSprites[value]
+  if (!sprite) {
+    return null
+  }
+  return <img src={sprite} alt="" className="segment-sprite" draggable={false} />
 }
 
 const SegmentDisplay = ({ value, ariaLabel }) => {
@@ -90,35 +102,6 @@ const SegmentDisplay = ({ value, ariaLabel }) => {
     </div>
   )
 }
-
-const MineIcon = ({ exploded }) => (
-  <svg viewBox="0 0 32 32" className={`mine-icon ${exploded ? 'exploded' : ''}`} role="presentation">
-    <circle cx="16" cy="16" r="8" />
-    <path d="M16 2 V8" />
-    <path d="M16 24 V30" />
-    <path d="M2 16 H8" />
-    <path d="M24 16 H30" />
-    <path d="M5 5 L10 10" />
-    <path d="M22 22 L27 27" />
-    <path d="M5 27 L10 22" />
-    <path d="M22 10 L27 5" />
-  </svg>
-)
-
-const FlagIcon = () => (
-  <svg viewBox="0 0 32 32" className="flag-icon" role="presentation">
-    <path d="M8 4 V28" />
-    <path d="M10 5 L24 10 L10 15 Z" />
-  </svg>
-)
-
-const CellNumber = ({ value, color }) => (
-  <svg viewBox="0 0 28 28" className="cell-number" role="presentation">
-    <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill={color}>
-      {value}
-    </text>
-  </svg>
-)
 
 const formatTimeMs = (ms) => {
   const total = Math.max(0, ms || 0)
@@ -391,6 +374,8 @@ function App() {
   const [flagMode, setFlagMode] = useState(false)
   const [actionCount, setActionCount] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [isFaceHeld, setIsFaceHeld] = useState(false)
+  const [tutorHighlight, setTutorHighlight] = useState(null)
   const threeBVGroupsRef = useRef(initialBoardPackageRef.current.groups)
   const [threeBVTotal, setThreeBVTotal] = useState(initialBoardPackageRef.current.total)
   const [evaluatedThreeBV, setEvaluatedThreeBV] = useState(0)
@@ -423,6 +408,7 @@ function App() {
       timerFrameRef.current = null
     }
     setFocusedCell({ row: Math.floor(config.rows / 2), col: Math.floor(config.cols / 2) })
+    setTutorHighlight(null)
   }, [config])
 
   useEffect(() => {
@@ -511,7 +497,9 @@ function App() {
 
       if (matchesKey(keybinds.newBoard, key)) {
         event.preventDefault()
+        setIsFaceHeld(true)
         resetGame()
+        setTimeout(() => setIsFaceHeld(false), 120)
         return
       }
 
@@ -580,7 +568,6 @@ function App() {
   const remainingMines = Math.max(0, config.mines - flaggedCount)
   const completion = totalSafeCells === 0 ? 0 : Math.round((revealedSafeCells / totalSafeCells) * 100)
 
-  const currentPalette = numberPalettes[preferences.numberPalette] ?? numberPalettes.classic
   const effectiveTimeMs = finalElapsedMs ?? elapsedMs
   const timeSeconds = effectiveTimeMs / 1000
   const hasTime = timeSeconds > 0
@@ -596,6 +583,7 @@ function App() {
   const shouldShowMetrics =
     threeBVTotal !== null && (preferences.showLiveMetrics || status === 'won' || status === 'lost')
   const metricsPlacement = preferences.metricsPlacement ?? 'below'
+  const tutorMode = preferences.tutorMode ?? 'off'
   const metricsData = {
     time: formatTimeMs(effectiveTimeMs),
     threeBV:
@@ -605,6 +593,97 @@ function App() {
     clicksRate: clicksPerSecond !== null ? clicksPerSecond.toFixed(2) : '—',
     efficiency: efficiency !== null ? `${efficiency.toFixed(1)}%` : '—',
     estimate: estimatedTimeSeconds !== null ? formatTimeMs(estimatedTimeSeconds * 1000) : '—',
+  }
+  const tutorHints = useMemo(() => {
+    if (tutorMode === 'off') return null
+    const revealSet = new Set()
+    const flagSet = new Set()
+    const guessSet = new Set()
+
+    board.forEach((row) =>
+      row.forEach((cell) => {
+        if (!cell.isRevealed && !cell.isFlagged) {
+          guessSet.add(`${cell.row}-${cell.col}`)
+        }
+        if (!cell.isRevealed || cell.neighborMines === 0) return
+
+        const neighbors = getNeighbors(cell.row, cell.col, config.rows, config.cols)
+        const hidden = neighbors.filter(({ row: nr, col: nc }) => !board[nr][nc].isRevealed)
+        if (hidden.length === 0) return
+        const flagged = neighbors.filter(({ row: nr, col: nc }) => board[nr][nc].isFlagged).length
+        const unknown = neighbors.filter(
+          ({ row: nr, col: nc }) => !board[nr][nc].isRevealed && !board[nr][nc].isFlagged,
+        )
+
+        if (flagged === cell.neighborMines) {
+          unknown.forEach(({ row: nr, col: nc }) => revealSet.add(`${nr}-${nc}`))
+        } else if (cell.neighborMines - flagged === unknown.length && unknown.length > 0) {
+          unknown.forEach(({ row: nr, col: nc }) => flagSet.add(`${nr}-${nc}`))
+        }
+      }),
+    )
+
+    return { revealSet, flagSet, guessSet }
+  }, [board, config.rows, config.cols, tutorMode])
+
+  const tutorAdvice = useMemo(() => {
+    if (
+      tutorMode === 'off' ||
+      !tutorHints ||
+      status === 'won' ||
+      status === 'lost' ||
+      status === 'idle'
+    ) {
+      return { type: 'none', cells: new Set() }
+    }
+    if (tutorHints.revealSet.size > 0) {
+      return { type: 'reveal', cells: tutorHints.revealSet }
+    }
+    if (tutorMode === 'regular' && tutorHints.flagSet.size > 0) {
+      return { type: 'flag', cells: tutorHints.flagSet }
+    }
+    if (tutorHints.guessSet.size > 0) {
+      return { type: 'guess', cells: tutorHints.guessSet }
+    }
+    return { type: 'none', cells: new Set() }
+  }, [tutorMode, tutorHints, status])
+
+  const tutorAllowsAction = (type, row, col) => {
+    if (tutorMode === 'off' || !tutorHints) return true
+    const key = `${row}-${col}`
+    if (type === 'reveal') {
+      if (tutorAdvice.type === 'reveal') {
+        return tutorAdvice.cells.has(key)
+      }
+      if (tutorAdvice.type === 'guess') {
+        return tutorHints.guessSet.has(key)
+      }
+      return tutorAdvice.type === 'none'
+    }
+    if (type === 'flag') {
+      if (tutorMode === 'noflag') return false
+      if (tutorAdvice.type !== 'flag') return tutorAdvice.type === 'none'
+      return tutorAdvice.cells.has(key)
+    }
+    return true
+  }
+
+  useEffect(() => {
+    if (tutorAdvice.type === 'none' || tutorMode === 'off') {
+      setTutorHighlight(null)
+      return
+    }
+    if (tutorAdvice.type === 'guess') {
+      setTutorHighlight({ type: 'guess', cells: new Set(tutorAdvice.cells) })
+    }
+  }, [tutorAdvice, tutorMode])
+
+  const triggerTutorHighlight = () => {
+    if (!tutorAdvice || tutorAdvice.type === 'none') return
+    setTutorHighlight({
+      type: tutorAdvice.type,
+      cells: new Set(tutorAdvice.cells),
+    })
   }
 
   const updateThreeBVProgress = (snapshot) => {
@@ -640,6 +719,7 @@ function App() {
   }
 
   const resetGame = () => {
+    setIsFaceHeld(false)
     setConfig((prev) => ({ ...prev }))
   }
 
@@ -656,6 +736,11 @@ function App() {
 
   const handleReveal = (row, col) => {
     if (status === 'lost' || status === 'won') return
+    if (!tutorAllowsAction('reveal', row, col)) {
+      triggerTutorHighlight('reveal')
+      return
+    }
+    setTutorHighlight(null)
     const currentBoard = ensureBoardAfterFirstMove(row, col)
     const nextBoard = cloneBoard(currentBoard)
     const cell = nextBoard[row][col]
@@ -701,6 +786,11 @@ function App() {
 
   const handleFlag = (row, col) => {
     if (status === 'lost' || status === 'won') return
+    if (!tutorAllowsAction('flag', row, col)) {
+      triggerTutorHighlight('flag')
+      return
+    }
+    setTutorHighlight(null)
     const current = board[row][col]
     if (current.isRevealed) return
     const nextBoard = cloneBoard(board)
@@ -711,6 +801,11 @@ function App() {
 
   const handleChord = (row, col) => {
     if (status === 'lost' || status === 'won') return
+    if (!tutorAllowsAction('reveal', row, col)) {
+      triggerTutorHighlight('reveal')
+      return
+    }
+    setTutorHighlight(null)
     const target = board[row][col]
     if (target.isFlagged) return
     if (!target.isRevealed || target.neighborMines === 0) return
@@ -795,15 +890,31 @@ function App() {
     won: 'Cleared!',
     lost: 'Boom!',
   }[status]
-
-  const statusFace = {
-    idle: '🙂',
-    playing: '😯',
-    won: '😎',
-    lost: '😵',
-  }[status]
+  const faceSprite =
+    status === 'lost'
+      ? faceLose
+      : status === 'won'
+        ? faceWin
+        : isFaceHeld
+          ? facePressed
+          : faceUnpressed
 
   const activeDifficultyLabel = difficulty === 'custom' ? 'Custom' : difficulties[difficulty]?.label ?? 'Custom'
+
+  const handleFaceMouseDown = () => {
+    setIsFaceHeld(true)
+  }
+
+  const handleFaceMouseUp = () => {
+    setIsFaceHeld(false)
+    resetGame()
+  }
+
+  const handleFaceMouseLeave = () => {
+    if (isFaceHeld) {
+      setIsFaceHeld(false)
+    }
+  }
 
   const handleCellMouseDown = (event, cell) => {
     event.preventDefault()
@@ -902,40 +1013,25 @@ function App() {
               <SegmentDisplay value={remainingMines} ariaLabel="Mines remaining" />
               <button
                 type="button"
-                className={`status-button status-${status}`}
-                onClick={resetGame}
+                className="face-button"
+                onMouseDown={handleFaceMouseDown}
+                onMouseUp={handleFaceMouseUp}
+                onMouseLeave={handleFaceMouseLeave}
                 aria-label="Restart board"
               >
-                {statusFace}
+                <img src={faceSprite} alt="" draggable={false} />
               </button>
               <SegmentDisplay value={timerSecondsDisplay} ariaLabel="Elapsed seconds" />
             </div>
 
             <div className="board-surface">
-            <div
-              className="board"
-              style={{ gridTemplateColumns: `repeat(${config.cols}, var(--cell-size))` }}
-            >
+              <div
+                className="board"
+                style={{ gridTemplateColumns: `repeat(${config.cols}, var(--cell-size))` }}
+              >
                 {board.map((row) =>
                   row.map((cell) => {
                     const isFocused = focusedCell.row === cell.row && focusedCell.col === cell.col
-                    const showHeat = preferences.showHeatmap && cell.isRevealed && !cell.isMine
-                    const heatStrength = showHeat ? Math.min(cell.neighborMines / 6, 1) : 0
-                    const style = {}
-                    if (showHeat) {
-                      style.boxShadow = `inset 0 0 0 999px rgba(255, 99, 71, ${0.12 + heatStrength * 0.25})`
-                    }
-
-                    let content = null
-                    if (!cell.isRevealed && cell.isFlagged) {
-                      content = <FlagIcon />
-                    } else if (cell.isRevealed && cell.isMine) {
-                      content = <MineIcon exploded={cell.isExploded} />
-                    } else if (cell.isRevealed && cell.neighborMines > 0) {
-                      const color = currentPalette[cell.neighborMines] ?? currentPalette[1]
-                      content = <CellNumber value={cell.neighborMines} color={color} />
-                    }
-
                     const isPressed =
                       !cell.isRevealed &&
                       isPointerDown &&
@@ -943,16 +1039,43 @@ function App() {
                       pressedCell.row === cell.row &&
                       pressedCell.col === cell.col
 
-                    const cellClasses = [
-                      'cell',
-                      cell.isRevealed ? 'revealed' : '',
-                      cell.isMine && cell.isRevealed ? 'mine' : '',
-                      cell.isFlagged ? 'flagged' : '',
-                      cell.isExploded ? 'exploded' : '',
-                      cell.isWrongFlag ? 'wrong-flag' : '',
-                      preferences.showHighlights && isFocused ? 'focused' : '',
-                      isPressed ? 'pressed' : '',
-                    ]
+                    const showHeat = preferences.showHeatmap && cell.isRevealed && !cell.isMine
+                    const heatStrength = showHeat ? Math.min(cell.neighborMines / 6, 1) : 0
+                    const style = {}
+                    if (showHeat) {
+                      style.boxShadow = `inset 0 0 0 999px rgba(255, 99, 71, ${0.12 + heatStrength * 0.25})`
+                    }
+
+                    let tileSprite = closedTile
+                    let tileAlt = 'Hidden tile'
+                    if (cell.isWrongFlag) {
+                      tileSprite = mineWrongSprite
+                      tileAlt = 'Wrong flag'
+                    } else if (cell.isRevealed) {
+                      if (cell.isMine) {
+                        tileSprite = cell.isExploded ? mineRedSprite : mineSprite
+                        tileAlt = cell.isExploded ? 'Exploded mine' : 'Mine'
+                      } else {
+                        tileSprite = typeSprites[cell.neighborMines] ?? typeSprites[0]
+                        tileAlt = `${cell.neighborMines} adjacent mines`
+                      }
+                    } else if (cell.isFlagged) {
+                      tileSprite = flagSprite
+                      tileAlt = 'Flagged tile'
+                    } else if (isPressed) {
+                      tileSprite = pressedTile
+                      tileAlt = 'Pressed tile'
+                    }
+
+                    const cellKey = `${cell.row}-${cell.col}`
+                    const tutorClass =
+                      tutorHighlight && tutorHighlight.cells.has(cellKey)
+                        ? tutorHighlight.type === 'flag'
+                          ? 'tutor-flag'
+                          : 'tutor-reveal'
+                        : ''
+
+                    const cellClasses = ['cell', preferences.showHighlights && isFocused ? 'focused' : '', tutorClass]
 
                     return (
                       <button
@@ -969,7 +1092,7 @@ function App() {
                         aria-label={`Row ${cell.row + 1} column ${cell.col + 1}`}
                         style={style}
                       >
-                        {content}
+                        <img src={tileSprite} alt={tileAlt} draggable={false} className="tile-sprite" />
                       </button>
                     )
                   }),
@@ -981,6 +1104,16 @@ function App() {
             <MetricsPanel placement="side" metrics={metricsData} />
           )}
         </div>
+        {tutorMode !== 'off' && tutorHighlight && (
+          <div className={`tutor-banner ${tutorHighlight.type}`}>
+            {tutorHighlight.type === 'flag' &&
+              'Efficiency tutor: flag the highlighted tiles before continuing.'}
+            {tutorHighlight.type === 'reveal' &&
+              'Efficiency tutor: reveal the highlighted safe tiles.'}
+            {tutorHighlight.type === 'guess' &&
+              'Multiple efficient moves detected — choose any highlighted tile.'}
+          </div>
+        )}
 
         <div className="info-row">
           <span className="chip">{activeDifficultyLabel}</span>
@@ -1219,19 +1352,6 @@ const SettingsPanel = ({
             />
           </label>
         </div>
-        <label className="select-field">
-          <span>Number palette</span>
-          <select
-            value={preferences.numberPalette}
-            onChange={(event) => onPreferencesChange({ numberPalette: event.target.value })}
-          >
-            {Object.keys(numberPalettes).map((palette) => (
-              <option key={palette} value={palette}>
-                {palette[0].toUpperCase() + palette.slice(1)}
-              </option>
-            ))}
-          </select>
-        </label>
       </section>
 
       <section>
@@ -1239,6 +1359,17 @@ const SettingsPanel = ({
           <h2>Controls</h2>
           <p>Turn on keyboard play and customize keybinds.</p>
         </div>
+        <label className="select-field">
+          <span>Efficiency tutor</span>
+          <select
+            value={preferences.tutorMode}
+            onChange={(event) => onPreferencesChange({ tutorMode: event.target.value })}
+          >
+            <option value="off">Off</option>
+            <option value="regular">Classic (flags allowed)</option>
+            <option value="noflag">No-flag</option>
+          </select>
+        </label>
         <label className="toggle">
           <input
             type="checkbox"
