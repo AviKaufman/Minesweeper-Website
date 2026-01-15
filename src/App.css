@@ -237,6 +237,20 @@ button.ghost {
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
   font-size: 0.9rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tutor-banner .tutor-link {
+  border: none;
+  background: transparent;
+  color: var(--accent-color);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
 }
 
 .tutor-banner.flag {
@@ -254,8 +268,13 @@ button.ghost {
   color: #ffe58f;
 }
 
+.tutor-banner.multi {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .cell.tutor-reveal::after,
 .cell.tutor-flag::after,
+.cell.tutor-chord::after,
 .cell.tutor-guess::after {
   content: '';
   position: absolute;
@@ -277,6 +296,11 @@ button.ghost {
 .cell.tutor-guess::after {
   border: 2px solid rgba(255, 229, 144, 0.9);
   box-shadow: 0 0 8px rgba(255, 229, 144, 0.5);
+}
+
+.cell.tutor-chord::after {
+  border: 2px solid rgba(186, 136, 255, 0.9);
+  box-shadow: 0 0 8px rgba(186, 136, 255, 0.5);
 }
 
 .tile-sprite {
