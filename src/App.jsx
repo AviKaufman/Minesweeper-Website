@@ -123,130 +123,103 @@ const prettyKey = (value) => {
 	return value.length === 1 ? value.toUpperCase() : value
 }
 
-const computeThreeBVProgress = (snapshot, groups) => {
-  if (!groups) return 0
-  let score = 0
-  groups.forEach(({ cells }) => {
-    const fullyRevealed = cells.every(({ row, col }) => snapshot[row][col].isRevealed)
-    const fullyFlagged =
-      cells.every(({ row, col }) => (snapshot[row][col].isMine ? snapshot[row][col].isFlagged : true)) &&
-      cells.some(({ row, col }) => snapshot[row][col].isMine)
-    if (fullyRevealed || fullyFlagged) {
-      score += 1
-    }
-  })
-  return score
-}
+const SOLVER_ACTION_CLEAR = 1
+const SOLVER_ACTION_FLAG = 2
+const SOLVER_ACTION_CHORD = 3
+const SOLVER_PLAY_STYLE_EFFICIENCY = 3
+const SOLVER_PLAY_STYLE_NOFLAGS_EFFICIENCY = 4
+const SOLVER_MAX_BINOMIAL_N = 1000
+const SOLVER_BINOMIAL_CACHE_SIZE = 5000
+const SOLVER_BINOMIAL_THRESHOLD = 500
 
-const generateCandidateMoves = (state, mode, limit = 40) => {
-  const frontier = []
-  const hidden = []
-  const chords = []
+const createEmptyTutorAnalysis = () => ({
+  typeSets: { reveal: new Set(), flag: new Set(), chord: new Set() },
+  guessCells: new Set(),
+})
 
-  state.forEach((row) =>
-    row.forEach((cell) => {
-      const neighbors = getNeighbors(cell.row, cell.col, state.length, state[0].length)
-      if (!cell.isRevealed) {
-        hidden.push({ cell, score: neighbors.filter(({ row: nr, col: nc }) => state[nr][nc].isRevealed).length })
-        if (neighbors.some(({ row: nr, col: nc }) => state[nr][nc].isRevealed)) {
-          frontier.push({ cell, score: neighbors.filter(({ row: nr, col: nc }) => state[nr][nc].isRevealed).length })
-        }
-      } else if (cell.neighborMines > 0) {
-        const hiddenNeighbors = neighbors.filter(({ row: nr, col: nc }) => !state[nr][nc].isRevealed)
-        if (hiddenNeighbors.length) {
-          chords.push({ type: 'chord', row: cell.row, col: cell.col, score: hiddenNeighbors.length })
-        }
-      }
-    }),
-  )
-
-  const baseSet = frontier.length ? frontier : hidden
-  const sortedBase = baseSet
-    .map(({ cell, score }) => ({ cell, score }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      if (a.cell.row !== b.cell.row) return a.cell.row - b.cell.row
-      return a.cell.col - b.cell.col
-    })
-
-  const candidates = []
-  sortedBase.slice(0, limit).forEach(({ cell }) => {
-    candidates.push({ type: 'reveal', row: cell.row, col: cell.col })
-  })
-
-  if (mode === 'regular') {
-    sortedBase
-      .filter(({ cell }) => !cell.isFlagged)
-      .slice(0, limit)
-      .forEach(({ cell }) => candidates.push({ type: 'flag', row: cell.row, col: cell.col }))
-  }
-
-  chords
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      if (a.row !== b.row) return a.row - b.row
-      return a.col - b.col
-    })
-    .slice(0, Math.max(30, limit))
-    .forEach(({ row, col }) => candidates.push({ type: 'chord', row, col }))
-
-  return candidates
-}
-
-const applyMoveState = (state, move) => {
-  const next = cloneBoard(state)
-  const descriptor = []
-  const applyReveal = (row, col) => {
-    const cell = next[row][col]
-    descriptor.push({ type: 'reveal', row, col })
-    if (cell.isFlagged || cell.isRevealed) {
-      descriptor[descriptor.length - 1].note = 'ignored'
-      return false
-    }
-    if (cell.isMine) {
-      cell.isExploded = true
-      descriptor[descriptor.length - 1].note = 'exploded'
-      return true
-    }
-    floodReveal(next, row, col)
+const initializeSolverGlobals = async (maxSquares) => {
+  if (typeof window === 'undefined' || !window.jsMinesweeperBridgeReady) {
     return false
   }
 
-  if (move.type === 'flag') {
-    const cell = next[move.row][move.col]
-    cell.isFlagged = !cell.isFlagged
-    descriptor.push({ type: 'flag', row: move.row, col: move.col })
-    return { board: next, exploded: false, descriptor }
+  if (!window.binomialCache) {
+    const maxN = Math.max(SOLVER_MAX_BINOMIAL_N, maxSquares + 10)
+    const binomial = new window.Binomial(maxN, SOLVER_BINOMIAL_THRESHOLD)
+    window.binomialCache = new window.BinomialCache(
+      SOLVER_BINOMIAL_CACHE_SIZE,
+      SOLVER_BINOMIAL_THRESHOLD,
+      binomial,
+    )
   }
 
-  if (move.type === 'chord') {
-    const cell = next[move.row][move.col]
-    descriptor.push({ type: 'chord', row: move.row, col: move.col })
-    if (!cell.isRevealed) {
-      descriptor[descriptor.length - 1].note = 'ignored'
-      return { board: next, exploded: false, descriptor }
-    }
-    const neighbors = getNeighbors(move.row, move.col, next.length, next[0].length)
-    const flagged = neighbors.filter(({ row, col }) => next[row][col].isFlagged).length
-    if (flagged !== cell.neighborMines) {
-      descriptor[descriptor.length - 1].note = 'insufficient flags'
-      return { board: next, exploded: false, descriptor }
-    }
-    let exploded = false
-    neighbors.forEach(({ row, col }) => {
-      const target = next[row][col]
-      if (target.isRevealed || target.isFlagged) return
-      if (applyReveal(row, col)) {
-        exploded = true
+  if (!window.ACTION_CLEAR) {
+    window.ACTION_CLEAR = SOLVER_ACTION_CLEAR
+    window.ACTION_FLAG = SOLVER_ACTION_FLAG
+    window.ACTION_CHORD = SOLVER_ACTION_CHORD
+  }
+
+  if (!window.BOMB) {
+    window.BOMB = 9
+  }
+
+  if (!window.showMessage) {
+    window.showMessage = () => {}
+  }
+
+  if (!window.sleep) {
+    window.sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  if (!window.jsMinesweeperSolverInitialized && typeof window.solver === 'function') {
+    await window.solver()
+    window.jsMinesweeperSolverInitialized = true
+  }
+
+  return window.jsMinesweeperSolverInitialized === true
+}
+
+const buildSolverBoard = (snapshot, config) => {
+  if (typeof window === 'undefined' || !window.Board) {
+    return null
+  }
+
+  const solverBoard = new window.Board(0, config.cols, config.rows, config.mines, 0, 'react')
+  snapshot.forEach((row) =>
+    row.forEach((cell) => {
+      const tile = solverBoard.getTileXY(cell.col, cell.row)
+      if (!tile) return
+      if (cell.isRevealed && !cell.isMine) {
+        tile.setValue(cell.neighborMines)
       }
-    })
-    return { board: next, exploded, descriptor }
+      if (cell.isFlagged) {
+        tile.toggleFlag()
+      }
+    }),
+  )
+  solverBoard.resetForAnalysis(true, true)
+  return solverBoard
+}
+
+const collectMineProbabilities = (solverBoard) => {
+  const probabilities = new Map()
+  if (!solverBoard?.tiles) {
+    return probabilities
   }
 
-  if (applyReveal(move.row, move.col)) {
-    return { board: next, exploded: true, descriptor }
-  }
-  return { board: next, exploded: false, descriptor }
+  solverBoard.tiles.forEach((tile) => {
+    const key = `${tile.y}-${tile.x}`
+    let mineProbability = null
+    if (tile.isSolverFoundBomb?.()) {
+      mineProbability = 1
+    } else if (!tile.isCovered?.()) {
+      mineProbability = 0
+    } else if (typeof tile.probability === 'number' && tile.probability >= 0) {
+      mineProbability = 1 - tile.probability
+    }
+    probabilities.set(key, mineProbability)
+  })
+
+  return probabilities
 }
 
 const getNeighbors = (row, col, rows, cols) => {
@@ -503,7 +476,9 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [isFaceHeld, setIsFaceHeld] = useState(false)
   const [tutorHighlight, setTutorHighlight] = useState(null)
-  const [tutorReport, setTutorReport] = useState([])
+  const [tutorAnalysis, setTutorAnalysis] = useState(createEmptyTutorAnalysis)
+  const [mineProbabilities, setMineProbabilities] = useState(() => new Map())
+  const [solverReady, setSolverReady] = useState(false)
   const threeBVGroupsRef = useRef(initialBoardPackageRef.current.groups)
   const [threeBVTotal, setThreeBVTotal] = useState(initialBoardPackageRef.current.total)
   const [evaluatedThreeBV, setEvaluatedThreeBV] = useState(0)
@@ -511,6 +486,7 @@ function App() {
   const [finalElapsedMs, setFinalElapsedMs] = useState(null)
   const [isPointerDown, setIsPointerDown] = useState(false)
   const [pressedCell, setPressedCell] = useState(null)
+  const solverInitRef = useRef(false)
   const timerFrameRef = useRef(null)
   const startTimeRef = useRef(null)
 
@@ -537,6 +513,8 @@ function App() {
     }
     setFocusedCell({ row: Math.floor(config.rows / 2), col: Math.floor(config.cols / 2) })
     setTutorHighlight(null)
+    setTutorAnalysis(createEmptyTutorAnalysis())
+    setMineProbabilities(new Map())
   }, [config])
 
   useEffect(() => {
@@ -712,9 +690,6 @@ function App() {
     threeBVTotal !== null && (preferences.showLiveMetrics || status === 'won' || status === 'lost')
   const metricsPlacement = preferences.metricsPlacement ?? 'below'
   const tutorMode = preferences.tutorMode ?? 'off'
-  const tutorDepthSetting = Math.max(1, Math.min(5, Number(preferences.tutorDepth) || 3))
-  const effectiveTutorDepth =
-    tutorMode === 'regular' ? tutorDepthSetting : Math.max(1, Math.min(tutorDepthSetting, 3))
   const metricsData = {
     time: formatTimeMs(effectiveTimeMs),
     threeBV:
@@ -725,96 +700,116 @@ function App() {
     efficiency: efficiency !== null ? `${efficiency.toFixed(1)}%` : '—',
     estimate: estimatedTimeSeconds !== null ? formatTimeMs(estimatedTimeSeconds * 1000) : '—',
   }
-  const tutorAnalysis = useMemo(() => {
-    if (tutorMode === 'off' || status === 'won' || status === 'lost' || status === 'idle') {
-      return {
-        typeSets: { reveal: new Set(), flag: new Set(), chord: new Set() },
-        guessCells: new Set(),
-        bestGain: 0,
-        report: [],
+  useEffect(() => {
+    let active = true
+
+    const initSolver = async () => {
+      if (solverInitRef.current) return
+      const maxSquares = config.rows * config.cols
+      const ready = await initializeSolverGlobals(maxSquares)
+      if (!active || !ready) return
+      solverInitRef.current = true
+      setSolverReady(true)
+    }
+
+    initSolver()
+    return () => {
+      active = false
+    }
+  }, [config.rows, config.cols])
+
+  useEffect(() => {
+    let active = true
+
+    if (tutorMode === 'off' || status === 'won' || status === 'lost' || status === 'idle' || !solverReady) {
+      setTutorAnalysis(createEmptyTutorAnalysis())
+      setMineProbabilities(new Map())
+      return () => {
+        active = false
       }
     }
 
-    const depthLimit = effectiveTutorDepth
-    const groups = threeBVGroupsRef.current
-    const baseline = computeThreeBVProgress(board, groups)
-    const initialMoves = generateCandidateMoves(board, tutorMode, tutorMode === 'regular' ? 60 : 35)
+    setTutorAnalysis(createEmptyTutorAnalysis())
+    setMineProbabilities(new Map())
 
-    const guessCells = new Set(
-      initialMoves.filter((move) => move.type === 'reveal').map((move) => `${move.row}-${move.col}`),
-    )
-
-    const scores = new Map()
-    const exploredPaths = []
-
-const registerGain = (move, gain, clicks, pathMoves) => {
-  const key = `${move.type}-${move.row}-${move.col}`
-  const prev = scores.get(key)
-  if (!prev || gain > prev.bestGain || (gain === prev.bestGain && clicks < prev.moves)) {
-    scores.set(key, { ...move, bestGain: gain, bestPath: pathMoves, moves: clicks })
-  }
-  exploredPaths.push({ path: pathMoves, gain, moves: clicks })
-    }
-
-    const explore = (state, remainingDepth, firstMove, path, clicks) => {
-      if (remainingDepth === 0) return
-      const nextMoves = generateCandidateMoves(state, tutorMode, 18)
-      nextMoves.forEach((move) => {
-        const result = applyMoveState(state, move)
-        if (result.exploded) {
-          exploredPaths.push({ path: [...path, ...result.descriptor], gain: -Infinity, moves: clicks + result.descriptor.length })
-          return
-        }
-        const gain = computeThreeBVProgress(result.board, groups) - baseline
-        const updatedPath = [...path, ...result.descriptor]
-        const updatedClicks = clicks + result.descriptor.length
-        registerGain(firstMove, gain, updatedClicks, updatedPath)
-        explore(result.board, remainingDepth - 1, firstMove, updatedPath, updatedClicks)
-      })
-    }
-
-    initialMoves.forEach((move) => {
-      const result = applyMoveState(board, move)
-      if (result.exploded) {
-        exploredPaths.push({ path: result.descriptor, gain: -Infinity, moves: result.descriptor.length })
+    const runSolver = async () => {
+      const solverBoard = buildSolverBoard(board, config)
+      if (!solverBoard || typeof window === 'undefined' || typeof window.solver !== 'function') {
         return
       }
-      const gain = computeThreeBVProgress(result.board, groups) - baseline
-      registerGain(move, gain, result.descriptor.length, result.descriptor)
-      if (depthLimit > 1) {
-        explore(result.board, depthLimit - 1, move, result.descriptor, result.descriptor.length)
+
+      try {
+        const playStyle =
+          tutorMode === 'noflag' ? SOLVER_PLAY_STYLE_NOFLAGS_EFFICIENCY : SOLVER_PLAY_STYLE_EFFICIENCY
+        const options = {
+          playStyle,
+          fullProbability: true,
+          advancedGuessing: false,
+          verbose: false,
+          hardcore: false,
+        }
+        const result = await window.solver(solverBoard, options)
+        if (!active) return
+
+        const typeSets = {
+          reveal: new Set(),
+          flag: new Set(),
+          chord: new Set(),
+        }
+
+        const actions = result?.actions ?? []
+        actions.forEach((action) => {
+          const key = `${action.y}-${action.x}`
+          if (tutorMode === 'noflag' && action.action === SOLVER_ACTION_FLAG) {
+            return
+          }
+          if (action.action === SOLVER_ACTION_CLEAR) {
+            typeSets.reveal.add(key)
+          } else if (action.action === SOLVER_ACTION_FLAG) {
+            typeSets.flag.add(key)
+          } else if (action.action === SOLVER_ACTION_CHORD) {
+            typeSets.chord.add(key)
+          }
+        })
+
+        setTutorAnalysis({ typeSets, guessCells: new Set() })
+        setMineProbabilities(collectMineProbabilities(solverBoard))
+      } catch (error) {
+        console.error('Efficiency tutor solver error', error)
+        if (!active) return
+        setTutorAnalysis(createEmptyTutorAnalysis())
+        setMineProbabilities(new Map())
       }
-    })
-
-    const entries = Array.from(scores.values())
-    const typeSets = {
-      reveal: new Set(),
-      flag: new Set(),
-      chord: new Set(),
     }
 
-    if (!entries.length) {
-      return { typeSets, guessCells, bestGain: 0, report: exploredPaths }
+    runSolver()
+
+    return () => {
+      active = false
     }
-
-    const bestGain = Math.max(...entries.map((entry) => entry.bestGain))
-    if (bestGain <= 0) {
-      return { typeSets, guessCells, bestGain, report: exploredPaths }
-    }
-
-    const bestEntries = entries.filter((entry) => entry.bestGain === bestGain)
-    const fewestMoves = Math.min(...bestEntries.map((entry) => entry.moves ?? Infinity))
-    bestEntries
-      .filter((entry) => (entry.moves ?? Infinity) === fewestMoves)
-      .forEach((entry) => {
-        typeSets[entry.type]?.add(`${entry.row}-${entry.col}`)
-      })
-
-    return { typeSets, guessCells: new Set(), bestGain, report: exploredPaths, fewestMoves }
-  }, [board, tutorMode, status, preferences.tutorDepth, effectiveTutorDepth])
+  }, [board, config.rows, config.cols, config.mines, solverReady, tutorMode, status])
 
   const tutorTypeSets = tutorAnalysis.typeSets
   const tutorGuessCells = tutorAnalysis.guessCells
+
+  const focusedMineProbability = useMemo(() => {
+    const key = `${focusedCell.row}-${focusedCell.col}`
+    const value = mineProbabilities.get(key)
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return null
+    }
+    return clamp(value, 0, 1)
+  }, [focusedCell, mineProbabilities])
+
+  const isProbabilityPending = tutorMode !== 'off' && solverReady && mineProbabilities.size === 0
+  const mineProbabilityLabel =
+    tutorMode === 'off'
+      ? '—'
+      : focusedMineProbability === null
+        ? isProbabilityPending
+          ? 'Calculating...'
+          : '—'
+        : `${(focusedMineProbability * 100).toFixed(1)}%`
 
   const tutorAllowsAction = (type, row, col) => {
     if (tutorMode === 'off') return true
@@ -861,11 +856,6 @@ const registerGain = (move, gain, clicks, pathMoves) => {
     })
   }, [tutorTypeSets, tutorAnalysis.guessCells])
 
-  useEffect(() => {
-    const sortedReport = (tutorAnalysis.report || []).slice().sort((a, b) => b.gain - a.gain)
-    setTutorReport(sortedReport)
-  }, [tutorAnalysis])
-
   const triggerTutorHighlight = () => {
     if (tutorGuessCells.size > 0) {
       setTutorHighlight({ mode: 'guess', cells: new Set(tutorGuessCells) })
@@ -887,136 +877,6 @@ const registerGain = (move, gain, clicks, pathMoves) => {
         chord: new Set(tutorTypeSets.chord),
       },
     })
-  }
-
-  const openTutorReport = () => {
-    if (typeof window === 'undefined' || !tutorReport.length) return
-    const reportWindow = window.open('', '_blank')
-    if (!reportWindow) return
-    const rows = tutorReport
-      .slice(0, 400)
-      .map(
-        ({ path, gain }, index) =>
-          `<tr><td>${index + 1}</td><td>${gain.toFixed(2)}</td><td>${path
-            .map((move) => `${move.type}@(${move.row + 1},${move.col + 1})`)
-            .join(' → ')}</td></tr>`,
-      )
-      .join('')
-    reportWindow.document.write(
-      `<html><head><title>Efficiency Tutor Search Report</title>
-      <style>body{font-family:Arial;padding:1rem;background:#111;color:#eee;}
-      table{width:100%;border-collapse:collapse;}
-      th,td{border:1px solid #333;padding:0.4rem;text-align:left;}
-      tr:nth-child(even){background:#1e1e1e;}</style></head>
-      <body><h1>Search results (depth ${effectiveTutorDepth})</h1>
-      <p>Sorted by highest 3BV gain. Evaluate your own sequence below.</p>
-      <form id="tutor-eval-form" style="margin-bottom:1rem;">
-        <input type="text" id="tutor-eval-input" placeholder="e.g. flag@(2,3)->chord@(2,4)" style="width:70%;" />
-        <button type="submit">Evaluate</button>
-      </form>
-      <div id="tutor-eval-result"></div>
-      <table><thead><tr><th>#</th><th>3BV gain</th><th>Move sequence</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      <script>
-        const boardData = ${JSON.stringify(board)};
-        const groupsData = ${JSON.stringify(
-          Array.from(threeBVGroupsRef.current?.values() ?? []).map(({ cells }) => ({ cells })),
-        )};
-        const baseline = ${computeThreeBVProgress(board, threeBVGroupsRef.current)};
-        const dirs = [-1,0,1];
-        const getNeighbors = (row,col,rows,cols) => {
-          const out=[];
-          dirs.forEach(dr=>dirs.forEach(dc=>{
-            if(dr===0 && dc===0) return;
-            const nr=row+dr,nc=col+dc;
-            if(nr>=0 && nr<rows && nc>=0 && nc<cols) out.push({row:nr,col:nc});
-          }));
-          return out;
-        };
-        const cloneBoard = (data) => data.map(row => row.map(cell => ({...cell})));
-        const floodReveal = (state,row,col) => {
-          const queue=[[row,col]];
-          while(queue.length){
-            const [r,c]=queue.pop();
-            const cell=state[r][c];
-            if(cell.isRevealed || cell.isFlagged || cell.isMine) continue;
-            cell.isRevealed=true;
-            if(cell.neighborMines===0){
-              getNeighbors(r,c,state.length,state[0].length).forEach(({row:nr,col:nc})=>{
-                if(!state[nr][nc].isRevealed && !state[nr][nc].isFlagged && !state[nr][nc].isMine){
-                  queue.push([nr,nc]);
-                }
-              });
-            }
-          }
-        };
-        const applyMove = (board, move) => {
-          const target = board[move.row][move.col];
-          if(move.type==='flag'){
-            target.isFlagged=!target.isFlagged;
-            return { exploded:false };
-          }
-          if(move.type==='chord'){
-            if(!target.isRevealed) return { exploded:false };
-            const neighbors=getNeighbors(move.row,move.col,board.length,board[0].length);
-            const flags=neighbors.filter(({row,col})=>board[row][col].isFlagged).length;
-            if(flags!==target.neighborMines) return { exploded:false };
-            let exploded=false;
-            neighbors.forEach(({row,col})=>{
-              const cell=board[row][col];
-              if(cell.isRevealed || cell.isFlagged) return;
-              if(cell.isMine){
-                exploded=true;
-                cell.isExploded=true;
-              }else{
-                floodReveal(board,row,col);
-              }
-            });
-            return { exploded };
-          }
-          if(target.isFlagged || target.isRevealed) return { exploded:false };
-          if(target.isMine){
-            target.isExploded=true;
-            return { exploded:true };
-          }
-          floodReveal(board,move.row,move.col);
-          return { exploded:false };
-        };
-        const computeBV = (state) => {
-          let count=0;
-          groupsData.forEach(group=>{
-            if(group.cells.some(({row,col}) => state[row][col].isRevealed && !state[row][col].isMine)){
-              count+=1;
-            }
-          });
-          return count;
-        };
-        const form=document.getElementById('tutor-eval-form');
-        const resultEl=document.getElementById('tutor-eval-result');
-        form.addEventListener('submit',(event)=>{
-          event.preventDefault();
-          const input=document.getElementById('tutor-eval-input').value.trim();
-          if(!input){ resultEl.textContent='Enter a sequence.'; return; }
-          const moves=input.split('->').map(part=>{
-            const match=part.trim().match(/(reveal|flag|chord)@\\((\\d+),(\\d+)\\)/i);
-            if(!match) return null;
-            return { type:match[1].toLowerCase(), row:Number(match[2])-1, col:Number(match[3])-1 };
-          });
-          if(moves.some((m)=>!m)){ resultEl.textContent='Invalid format.'; return; }
-          const state=cloneBoard(boardData);
-          let exploded=false;
-          moves.forEach((move)=>{
-            if(exploded) return;
-            const res=applyMove(state,move);
-            exploded=res.exploded;
-          });
-          const gain=computeBV(state)-baseline;
-          resultEl.textContent= exploded ? 'Sequence exploded a mine.' : '3BV gain: '+gain.toFixed(2);
-        });
-      </script>
-      </body></html>`,
-    )
-    reportWindow.document.close()
   }
 
   const updateThreeBVProgress = (snapshot) => {
@@ -1401,6 +1261,15 @@ const registerGain = (move, gain, clicks, pathMoves) => {
                     }
 
                     const cellKey = `${cell.row}-${cell.col}`
+                    const cellMineProbability = mineProbabilities.get(cellKey)
+                    const normalizedMineProbability =
+                      typeof cellMineProbability === 'number'
+                        ? clamp(cellMineProbability, 0, 1)
+                        : null
+                    const probabilityTitle =
+                      tutorMode !== 'off' && normalizedMineProbability !== null
+                        ? `Mine probability: ${(normalizedMineProbability * 100).toFixed(1)}%`
+                        : undefined
                     let tutorClass = ''
                     if (tutorHighlight) {
                       if (tutorHighlight.mode === 'guess' && tutorHighlight.cells.has(cellKey)) {
@@ -1431,6 +1300,7 @@ const registerGain = (move, gain, clicks, pathMoves) => {
                         onContextMenu={(event) => event.preventDefault()}
                         onMouseEnter={() => handleCellMouseEnter(cell)}
                         aria-label={`Row ${cell.row + 1} column ${cell.col + 1}`}
+                        title={probabilityTitle}
                         style={style}
                       >
                         <img src={tileSprite} alt={tileAlt} draggable={false} className="tile-sprite" />
@@ -1459,11 +1329,6 @@ const registerGain = (move, gain, clicks, pathMoves) => {
                 {tutorHighlight.sets.chord.size > 0 && <span>Chord the purple tiles.</span>}
               </>
             )}
-            {tutorReport.length > 0 && (
-              <button type="button" className="tutor-link" onClick={openTutorReport}>
-                View search explanation
-              </button>
-            )}
           </div>
         )}
 
@@ -1487,6 +1352,11 @@ const registerGain = (move, gain, clicks, pathMoves) => {
             Alt/⌘ click or press {prettyKey(keybinds.flag)} to flag · Click a revealed number to chord.
           </span>
         </div>
+        {tutorMode !== 'off' && (
+          <div className="info-row">
+            <span className="hint">Mine probability (focused tile): {mineProbabilityLabel}</span>
+          </div>
+        )}
         {preferences.enableKeyboardNavigation && (
           <div className="info-row keyboard">
             <span className="hint">
